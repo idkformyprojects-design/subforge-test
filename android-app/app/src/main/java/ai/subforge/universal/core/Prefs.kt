@@ -28,6 +28,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("double_check", false)
         set(v) { sp.edit().putBoolean("double_check", v).apply() }
 
+    /** Set when the user opened Google's key page, so the app checks the clipboard when they come back (15 min). */
+    var awaitingKeyUntil: Long
+        get() = sp.getLong("await_key", 0L)
+        set(v) { sp.edit().putLong("await_key", v).apply() }
+
     var askedBattery: Boolean
         get() = sp.getBoolean("asked_battery", false)
         set(v) { sp.edit().putBoolean("asked_battery", v).apply() }
@@ -65,4 +70,17 @@ object Languages {
 
     fun get(index: Int): Lang = ALL[index.coerceIn(0, ALL.size - 1)]
     fun isOriginal(lang: Lang): Boolean = lang.iso639_2 == "und"
+}
+
+/** Recognises a Google AI Studio API key in copied text, so the user never has to type it. */
+object KeyHelper {
+    // Google API keys are "AIza" followed by 35 letters, digits, "-" or "_".
+    private val KEY = Regex("AIza[0-9A-Za-z_\\-]{35}")
+
+    const val SETUP_URL = "https://aistudio.google.com/apikey"
+
+    fun find(text: CharSequence?): String? = text?.let { KEY.find(it)?.value }
+
+    /** "AIzaSy…k9Q" — enough to recognise it without showing the whole key. */
+    fun mask(key: String): String = if (key.length > 10) key.take(6) + "…" + key.takeLast(3) else "…"
 }

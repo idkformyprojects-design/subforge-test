@@ -1,6 +1,7 @@
 package ai.subforge.universal
 
 import ai.subforge.universal.core.Gemini
+import ai.subforge.universal.core.KeyHelper
 import ai.subforge.universal.core.Languages
 import ai.subforge.universal.core.Media
 import ai.subforge.universal.core.Prefs
@@ -8,6 +9,7 @@ import ai.subforge.universal.core.Project
 import ai.subforge.universal.core.ProjectStore
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -46,6 +48,8 @@ class MainActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var status: TextView
     private lateinit var tryNowBtn: Button
+    private lateinit var setupCard: LinearLayout
+    private lateinit var setupStatus: TextView
     private lateinit var batteryNote: TextView
 
     private var videoUri: Uri? = null
@@ -70,6 +74,12 @@ class MainActivity : Activity() {
         super.onResume()
         ProjectStore.addListener(onChange)
         refresh()
+    }
+
+    /** Coming back from Google's page: look for the copied key (only right after the user started the setup). */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && System.currentTimeMillis() < prefs.awaitingKeyUntil) checkClipboard(auto = true)
     }
 
     override fun onPause() {
@@ -102,6 +112,7 @@ class MainActivity : Activity() {
             (p.state == Project.STATE_STOPPED || p.state == Project.STATE_PARTIAL ||
                 p.state == Project.STATE_WORKING || p.state == Project.STATE_IMPROVING)
         continueBtn.visibility = if (canContinue) View.VISIBLE else View.GONE
+        setupCard.visibility = if (prefs.apiKey.isBlank()) View.VISIBLE else View.GONE
         tryNowBtn.visibility = if (ProjectStore.running && ProjectStore.waitUntil > 0) View.VISIBLE else View.GONE
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         batteryNote.visibility = if (pm.isIgnoringBatteryOptimizations(packageName)) View.GONE else View.VISIBLE
@@ -117,6 +128,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
+
+        setupCard = buildSetupCard()
+        col.addView(setupCard)
 
         col.addView(heading("1. Choose a video"))
         col.addView(button("Choose video") { pickVideo() })
@@ -229,8 +243,7 @@ class MainActivity : Activity() {
     private fun start() {
         val uri = videoUri ?: return toast("Choose a video first")
         if (prefs.apiKey.isBlank()) {
-            toast("Add your free Gemini API key first")
-            showSettings()
+            toast("First connect to Google (free) using the box at the top")
             return
         }
         val p = if (Project.exists(this)) ProjectStore.get(this) else null
@@ -302,6 +315,94 @@ class MainActivity : Activity() {
         startActivity(Intent(this, EditorActivity::class.java))
     }
 
+    // ---------------------------------------------------------------- easy key setup
+
+    private fun buildSetupCard(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(14), dp(12), dp(14), dp(12))
+        setBackgroundColor(android.graphics.Color.argb(28, 99, 102, 241))
+        addView(TextView(this@MainActivity).apply {
+            text = "Connect to Google (free, about 1 minute)"
+            textSize = 17f
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        addView(TextView(this@MainActivity).apply {
+            setPadding(0, dp(6), 0, dp(6))
+            text = "SubForge uses Google's free Gemini AI with your own free key. No typing needed:\n\n" +
+                "1.  Tap the button below. Google's page opens (sign in with your Google account if asked).\n" +
+                "2.  Tap \u201cCreate API key\u201d (accept Google's terms if asked), then tap \u201cCopy\u201d.\n" +
+                "3.  Come back to SubForge. It finds the key by itself."
+        })
+        addView(button("Open Google's key page") { openKeyPage() })
+        addView(button("I've copied my key \u2014 use it") { checkClipboard(auto = false) })
+        setupStatus = TextView(this@MainActivity).apply { setPadding(0, dp(6), 0, 0) }
+        addView(setupStatus)
+    }
+
+    private fun openKeyPage() {
+        prefs.awaitingKeyUntil = System.currentTimeMillis() + 15 * 60_000L
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(KeyHelper.SETUP_URL)))
+        } catch (e: Exception) {
+            toast("Open this in your browser: ${KeyHelper.SETUP_URL}")
+        }
+    }
+
+    private fun clipboardText(): CharSequence? = try {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Finds a copied key. [auto] = called by itself on return from Google's page (stays quiet if nothing found). */
+    private fun checkClipboard(auto: Boolean) {
+        val key = KeyHelper.find(clipboardText())
+        if (key == null) {
+            if (!auto) {
+                AlertDialog.Builder(this)
+                    .setTitle("No key copied yet")
+                    .setMessage("On Google's page, tap \u201cCreate API key\u201d, then the \u201cCopy\u201d button next to the new key, and come back here.")
+                    .setPositiveButton("Open Google's page") { _, _ -> openKeyPage() }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+            return
+        }
+        prefs.awaitingKeyUntil = 0L
+        if (key == prefs.apiKey) return
+        AlertDialog.Builder(this)
+            .setTitle("Found your key")
+            .setMessage("${KeyHelper.mask(key)}\n\nUse this key for SubForge?")
+            .setPositiveButton("Use it") { _, _ -> useKey(key) }
+            .setNegativeButton("No", null)
+            .show()
+    }
+
+    private fun useKey(key: String) {
+        prefs.apiKey = key
+        // The key is private; do not leave it lying in the clipboard for other apps.
+        try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            if (Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip()
+        } catch (e: Exception) { }
+        refresh()
+        status.text = "Checking your key with Google…"
+        val g = Gemini(key)
+        val model = prefs.model
+        thread {
+            val err = g.test(model)
+            runOnUiThread {
+                status.text = when {
+                    err == null -> "\u2713 Connected to Google. You're ready: choose a video and tap Start."
+                    err.contains("busy", ignoreCase = true) ->
+                        "\u2713 Key saved. (Google is busy right now, which is normal; it will work when you start.)"
+                    else -> "Your key was saved, but Google said: $err\nOpen Settings to check it."
+                }
+            }
+        }
+    }
+
     private fun showSettings() {
         val pad = dp(20)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, dp(8), pad, 0) }
@@ -316,6 +417,15 @@ class MainActivity : Activity() {
             isSingleLine = true
         }
         box.addView(keyField)
+        val keyRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        keyRow.addView(button("Paste") {
+            val k = KeyHelper.find(clipboardText())
+            if (k != null) keyField.setText(k) else toast("No key in the clipboard. Copy it on Google's page first.")
+        }.apply { layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
+        keyRow.addView(button("Get a free key") { openKeyPage() }.apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        box.addView(keyRow)
         box.addView(TextView(this).apply { text = "Best model (used first)"; setPadding(0, dp(12), 0, 0) })
         val modelField = EditText(this).apply { setText(prefs.model); isSingleLine = true }
         box.addView(modelField)
