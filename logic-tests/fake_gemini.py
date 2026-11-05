@@ -23,7 +23,7 @@ class H(BaseHTTPRequestHandler):
         with LOCK:
             c = STATE["cfg"].get(model, {})
             n = sum(1 for x in STATE["calls"] if x[0] == model) + 1
-            STATE["calls"].append([model, kind])
+            STATE["calls"].append([model, kind, "Background about this video" in prompt and "Aparajito" in prompt])
         if c.get("delay"):
             import time; time.sleep(c["delay"])
         if c.get("missing"): return reply(self, 404, {"error": {"message": f"models/{model} is not found"}})

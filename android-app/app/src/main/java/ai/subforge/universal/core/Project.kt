@@ -42,6 +42,8 @@ class Project(
     val source: MutableList<String>, // original lines (track mode) so batches can be re-translated
     var state: String = STATE_WORKING,
     var message: String = "",
+    /** What the user told us about the video (title, names, spoken language), sent with every request. */
+    var about: String = "",
 ) {
     val language: Languages.Lang get() = Languages.get(languageIndex)
 
@@ -85,6 +87,7 @@ class Project(
             .put("src", JSONArray(source))
             .put("state", state)
             .put("msg", message)
+            .put("about", about)
         val f = file(context)
         val tmp = File(f.parentFile, f.name + ".tmp")
         tmp.writeText(json.toString(), Charsets.UTF_8)
@@ -175,7 +178,7 @@ class Project(
             Project(
                 Uri.parse(json.getString("video")), json.optString("name"), json.optInt("lang", 1),
                 json.optBoolean("speech", true), json.optBoolean("dc", false),
-                cues, parts, src, json.optString("state", STATE_DONE), json.optString("msg"),
+                cues, parts, src, json.optString("state", STATE_DONE), json.optString("msg"), json.optString("about"),
             )
         } catch (e: Exception) {
             null

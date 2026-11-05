@@ -1,4 +1,4 @@
-# SubForge (v1.4.0)
+# SubForge (v1.5.0)
 
 Android app that makes subtitles for any video, in any language, using your own **free** Google Gemini key.
 
@@ -15,6 +15,13 @@ Android app that makes subtitles for any video, in any language, using your own 
    - Burn subtitles into the picture (slow, but shows on every player, WhatsApp, etc.)
 
 The video never leaves the phone. Only the sound goes to Gemini.
+
+### New in v1.5.0
+- **"About the video" box:** title, character/place names and spoken language are sent with every request, so names are
+  spelled right and ambiguous words get the right meaning.
+- **Sound clean-up before sending** (on by default, Settings): cuts rumble and hiss and lifts quiet speech, on the phone.
+- **More free requests per day:** Google counts the free limit per model, so the default backup list now includes more free
+  models (gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite). Missing or used-up models are asked only once per job.
 
 ### New in v1.4.0
 - **Connect to Google in 3 taps, no typing.** A setup card opens Google's key page; after "Create API key" → "Copy",

@@ -36,6 +36,8 @@ class Worker(
     private var mainBusy = false     // after the best model is busy once, do not wait long for it on every part
     private var mainMissing = false  // the best model's name does not exist for this key
     private var mainExhausted = false // the best model's free daily limit is used up
+    /** Backup models that do not exist for this key or have used up their daily limit: skip them for this run. */
+    private val deadBackups = HashSet<String>()
 
     /** The best model cannot be used any more during this run (missing or daily limit). */
     private val mainBlocked get() = mainMissing || mainExhausted
@@ -53,19 +55,22 @@ class Worker(
 
     // ------------------------------------------------------------------ 1. prepare
 
-    fun prepare(video: Uri, name: String, langIdx: Int, fromSpeech: Boolean, doubleCheck: Boolean): Project {
+    fun prepare(
+        video: Uri, name: String, langIdx: Int, fromSpeech: Boolean, doubleCheck: Boolean,
+        about: String = "", cleanSound: Boolean = true,
+    ): Project {
         val dir = Project.partsDir(context)
         dir.deleteRecursively()
         val lang = Languages.get(langIdx)
         return if (fromSpeech) {
             val duration = Media.durationSec(context, video)
             events.progress("Extracting audio…", 0.0)
-            val clips = Media.extractAudioClips(context, video, dir, CLIP_SEC) { t ->
+            val clips = Media.extractAudioClips(context, video, dir, CLIP_SEC, cleanSound) { t ->
                 if (duration > 0) events.progress("Extracting audio… ${pct(t / duration)}", 0.05 * (t / duration))
             }
             check()
             val parts = clips.mapIndexed { i, f -> Part(i, i * CLIP_SEC.toDouble(), f.absolutePath, 0, 0) }
-            Project(video, name, langIdx, true, doubleCheck, ArrayList(), parts.toMutableList(), ArrayList())
+            Project(video, name, langIdx, true, doubleCheck, ArrayList(), parts.toMutableList(), ArrayList(), about = about)
         } else {
             events.progress("Reading the subtitle track…", 0.02)
             val raw = Media.extractSubtitleTrack(context, video, File(context.cacheDir, "original.srt"))
@@ -85,7 +90,7 @@ class Worker(
                 parts.add(p)
                 from = to
             }
-            Project(video, name, langIdx, false, false, cues, parts, cues.map { it.text }.toMutableList())
+            Project(video, name, langIdx, false, false, cues, parts, cues.map { it.text }.toMutableList(), about = about)
         }
     }
 
@@ -241,6 +246,7 @@ class Worker(
             check()
             val isMain = model == mainModel
             if (isMain && mainBlocked) continue
+            if (!isMain && model in deadBackups) continue
             val attempts = when {
                 !isMain -> BACKUP_ATTEMPTS
                 firstPass && mainBusy -> 1      // do not wait long for a busy main model on every part
@@ -251,11 +257,11 @@ class Worker(
                 if (p.fromSpeech) {
                     val clip = File(part.audio ?: return false)
                     if (!clip.exists()) throw GeminiException("The saved audio for part ${part.index + 1} is missing. Start the video again.")
-                    val raw = gemini.transcribe(model, clip, target, attempts)
+                    val raw = gemini.transcribe(model, clip, target, attempts, p.about)
                     applySpeech(part, raw, model, isMain, if (improving && isMain) Cue.MARK_FIXED else null)
                 } else {
                     val lines = synchronized(ProjectStore) { p.source.subList(part.from, part.to).toList() }
-                    val out = gemini.translate(model, lines, p.language.name, attempts)
+                    val out = gemini.translate(model, lines, p.language.name, attempts, p.about)
                     ProjectStore.edit(context) { pr ->
                         for (k in part.from until part.to) {
                             if (k !in pr.cues.indices || pr.cues[k].edited) continue
@@ -272,10 +278,10 @@ class Worker(
                 if (isMain) mainBusy = false
                 return true
             } catch (e: GeminiMissingModelException) {
-                if (isMain) mainMissing = true
+                if (isMain) mainMissing = true else deadBackups.add(model)
             } catch (e: GeminiBusyException) {
                 if (isMain) mainBusy = true
-                if (isMain && e is GeminiDailyLimitException) mainExhausted = true
+                if (e is GeminiDailyLimitException) { if (isMain) mainExhausted = true else deadBackups.add(model) }
             }
         }
         if (models.size == 1) throw GeminiBusyException("$mainModel is busy")
@@ -304,7 +310,7 @@ class Worker(
             p.cues.filter { it.part == part.index }.map { Cue(it.start - part.offset, it.end - part.offset, it.text) }
         }
         val reviewed = try {
-            gemini.review(mainModel, clip, current, target, IMPROVE_ATTEMPTS)
+            gemini.review(mainModel, clip, current, target, IMPROVE_ATTEMPTS, p.about)
         } catch (e: GeminiMissingModelException) {
             mainMissing = true
             return

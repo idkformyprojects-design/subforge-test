@@ -6,7 +6,7 @@ import java.io.File
 object Media {
     fun cancelAll() {}
     fun durationSec(context: Context, uri: Uri): Double = 900.0
-    fun extractAudioClips(context: Context, video: Uri, outDir: File, clipSec: Int, onTimeSec: (Double) -> Unit): List<File> {
+    fun extractAudioClips(context: Context, video: Uri, outDir: File, clipSec: Int, cleanSound: Boolean, onTimeSec: (Double) -> Unit): List<File> {
         outDir.mkdirs(); return (0 until 3).map { File(outDir, "clip_000$it.mp3").apply { writeBytes(ByteArray(64) { 7 }) } }
     }
     fun extractSubtitleTrack(context: Context, video: Uri, outSrt: File): String? =

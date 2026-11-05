@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var tryNowBtn: Button
     private lateinit var setupCard: LinearLayout
+    private lateinit var aboutField: EditText
     private lateinit var setupStatus: TextView
     private lateinit var batteryNote: TextView
 
@@ -154,6 +155,20 @@ class MainActivity : Activity() {
             setSelection(prefs.languageIndex.coerceIn(0, Languages.ALL.size - 1))
         }
         col.addView(langSpinner)
+
+        col.addView(heading("4. About the video (optional, improves accuracy)"))
+        aboutField = EditText(this).apply {
+            hint = "e.g. Bengali family drama \u201cAparajito\u201d. Characters: Apu, Durga, Sarbajaya. Spoken language: Bengali."
+            setText(prefs.about)
+            minLines = 2
+            textSize = 15f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        col.addView(aboutField)
+        col.addView(TextView(this).apply {
+            textSize = 13f
+            text = "Title, character or place names and the language spoken help the AI spell names right and pick the right meaning."
+        })
 
         col.addView(CheckBox(this).apply {
             text = "Double-check with a second listen (most accurate)"
@@ -264,8 +279,10 @@ class MainActivity : Activity() {
         val langIdx = langSpinner.selectedItemPosition
         prefs.languageIndex = langIdx
         val fromSpeech = modeGroup.checkedRadioButtonId == MODE_SPEECH
+        val about = aboutField.text.toString().trim()
+        prefs.about = about
         startingAt = System.currentTimeMillis()
-        JobService.start(this, uri, Media.displayName(this, uri), langIdx, fromSpeech)
+        JobService.start(this, uri, Media.displayName(this, uri), langIdx, fromSpeech, about)
         refresh()
     }
 
@@ -432,6 +449,11 @@ class MainActivity : Activity() {
         box.addView(TextView(this).apply { text = "Backup models when it is busy (comma separated)"; setPadding(0, dp(12), 0, 0) })
         val backupField = EditText(this).apply { setText(prefs.backupModels); isSingleLine = true }
         box.addView(backupField)
+        val cleanBox = CheckBox(this).apply {
+            text = "Clean up the sound first (filters rumble and hiss, lifts quiet speech). Recommended."
+            isChecked = prefs.cleanSound
+        }
+        box.addView(cleanBox)
         box.addView(button("Reset models to default") {
             modelField.setText(Prefs.DEFAULT_MODEL)
             backupField.setText(Prefs.DEFAULT_BACKUPS)
@@ -441,6 +463,7 @@ class MainActivity : Activity() {
             prefs.apiKey = keyField.text.toString()
             prefs.model = modelField.text.toString()
             prefs.backupModels = backupField.text.toString()
+            prefs.cleanSound = cleanBox.isChecked
         }
 
         AlertDialog.Builder(this)

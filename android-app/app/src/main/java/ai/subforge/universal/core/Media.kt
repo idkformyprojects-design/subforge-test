@@ -75,8 +75,14 @@ object Media {
      * Pulls the first audio track out of the video as 16 kHz mono MP3 clips of [clipSec] seconds
      * (about 1.2 MB per 5 minutes). Returns the clips in order.
      */
+    /**
+     * Light clean-up that helps the AI hear dialogue: cut rumble below 80 Hz and hiss above 8 kHz,
+     * and lift quiet speech (speechnorm). Takes seconds on the phone.
+     */
+    private const val SPEECH_FILTER = "highpass=f=80,lowpass=f=8000,speechnorm=e=6:r=0.0001:l=1"
+
     fun extractAudioClips(
-        context: Context, video: Uri, outDir: File, clipSec: Int, onTimeSec: (Double) -> Unit,
+        context: Context, video: Uri, outDir: File, clipSec: Int, cleanSound: Boolean, onTimeSec: (Double) -> Unit,
     ): List<File> {
         outDir.deleteRecursively()
         outDir.mkdirs()
@@ -84,6 +90,7 @@ object Media {
         val res = run(
             listOf(
                 "-y", "-i", input, "-vn", "-sn", "-map", "0:a:0",
+            ) + (if (cleanSound) listOf("-af", SPEECH_FILTER) else emptyList()) + listOf(
                 "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "32k",
                 "-f", "segment", "-segment_time", clipSec.toString(), "-reset_timestamps", "1",
                 File(outDir, "clip_%04d.mp3").absolutePath,

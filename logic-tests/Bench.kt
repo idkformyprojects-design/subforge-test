@@ -14,6 +14,10 @@ fun control(json: String) {
     val c = URL("http://127.0.0.1:18777/control").openConnection() as HttpURLConnection
     c.requestMethod = "POST"; c.doOutput = true; c.outputStream.use { it.write(json.toByteArray()) }; c.inputStream.readBytes()
 }
+fun aboutFlags(): List<Boolean> {
+    val a = org.json.JSONObject(URL("http://127.0.0.1:18777/calls").readText()).getJSONArray("calls")
+    return (0 until a.length()).map { a.getJSONArray(it).optBoolean(2) }
+}
 fun calls(): List<Pair<String, String>> {
     val t = URL("http://127.0.0.1:18777/calls").readText()
     val a = org.json.JSONObject(t).getJSONArray("calls")
@@ -185,6 +189,26 @@ fun main() {
     ProjectStore.replace(c, restored)
     check("reopened entry is current, finished, with its lines", ProjectStore.get(c)!!.cues.size == 6 && restored.state == Project.STATE_DONE)
     check("history now holds the other one", Project.history(c).size == 1)
+
+    println("17. 'About the video' text is sent with every request, and kept in the project")
+    control("{}"); c = ctx(); ev = Ev()
+    val w17 = Worker(c, MAIN, BACKUPS, "TESTKEY", ev)
+    ProjectStore.replace(c, w17.prepare(Uri.parse("content://video/1"), "movie.mp4", 1, true, true, "Bengali drama Aparajito; characters Apu, Durga"))
+    w17.run(); p = ProjectStore.get(c)!!
+    check("all 6 requests (3 write + 3 double-check) carried it", aboutFlags().size == 6 && aboutFlags().all { it }, aboutFlags())
+    check("saved with the project and survives reload", Project.load(c)!!.about.contains("Aparajito"))
+    control("{}"); c = ctx(); ev = Ev(); job(c, ev).run()
+    check("not sent when the box is empty", aboutFlags().none { it }, aboutFlags())
+
+    println("18. A missing backup model is asked once, not on every part")
+    control("""{"best":{"busy":999},"flash-latest":{"missing":true}}"""); c = ctx(); ev = Ev(); st = job(c, ev).run(); p = ProjectStore.get(c)!!
+    check("all lines made by the next backup", p.cues.size == 6 && p.cues.all { it.text.endsWith("by lite") }, p.cues)
+    check("missing backup asked only once", calls().count { it.first == "flash-latest" } == 1, calls())
+
+    println("19. A backup that hit its daily limit is skipped for the rest of the job")
+    control("""{"best":{"busy":999},"flash-latest":{"daily":true}}"""); c = ctx(); ev = Ev(); st = job(c, ev).run(); p = ProjectStore.get(c)!!
+    check("all lines made by the next backup", p.cues.all { it.text.endsWith("by lite") }, p.cues)
+    check("used-up backup asked only once", calls().count { it.first == "flash-latest" } == 1, calls())
 
     println(if (failures == 0) "\nALL SCENARIOS PASSED" else "\n$failures CHECK(S) FAILED")
     if (failures > 0) System.exit(1)

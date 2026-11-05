@@ -41,11 +41,12 @@ class Gemini(private val apiKey: String) {
     // ------------------------------------------------------------------ jobs
 
     /** Transcribes one audio clip. Returned times are relative to the clip start. */
-    fun transcribe(model: String, clip: File, targetLanguage: String?, attempts: Int): List<Cue> {
+    fun transcribe(model: String, clip: File, targetLanguage: String?, attempts: Int, about: String = ""): List<Cue> {
         val prompt = """
             You are a professional film subtitler. Listen to this audio clip from a video and
             produce subtitles for all spoken dialogue.
             ${languageRule(targetLanguage)}
+            ${aboutRule(about)}
             Rules:
             - "start" and "end" are numbers of seconds from the beginning of THIS clip (e.g. 12.4).
             - Each subtitle is 1 to 7 seconds long and at most 2 short lines (about 42 characters per line).
@@ -61,7 +62,7 @@ class Gemini(private val apiKey: String) {
      * Second listen: the model hears the clip again next to the current subtitles and returns a corrected list
      * (misheard words, names, missing lines, timing, translation quality).
      */
-    fun review(model: String, clip: File, current: List<Cue>, targetLanguage: String?, attempts: Int): List<Cue> {
+    fun review(model: String, clip: File, current: List<Cue>, targetLanguage: String?, attempts: Int, about: String = ""): List<Cue> {
         val existing = JSONArray()
         for (c in current) {
             existing.put(JSONObject().put("start", round2(c.start)).put("end", round2(c.end)).put("text", c.text))
@@ -70,6 +71,7 @@ class Gemini(private val apiKey: String) {
             You are a senior subtitle editor checking another subtitler's work.
             Listen to this audio clip very carefully and compare it with the draft subtitles below.
             ${languageRule(targetLanguage)}
+            ${aboutRule(about)}
             Fix every mistake: misheard or wrong words, wrong names, missing dialogue, lines that were never said,
             wrong start/end times, and unnatural or inaccurate translation.
             Keep lines that are already correct exactly as they are.
@@ -83,13 +85,14 @@ class Gemini(private val apiKey: String) {
     }
 
     /** Translates the text of the given lines, keeping their order and count. */
-    fun translate(model: String, lines: List<String>, targetLanguage: String, attempts: Int): List<String> {
+    fun translate(model: String, lines: List<String>, targetLanguage: String, attempts: Int, about: String = ""): List<String> {
         val input = JSONArray()
         lines.forEachIndexed { i, t -> input.put(JSONObject().put("i", i).put("t", t)) }
         val prompt = """
             You are a professional film subtitle translator. Translate the "t" field of every item
             into natural, fluent $targetLanguage, keeping the meaning, tone and names.
             Keep each translation short enough to read as a subtitle (at most 2 lines).
+            ${aboutRule(about)}
             Return exactly one item for every input item, with the same "i".
             Input:
             $input
@@ -126,6 +129,17 @@ class Gemini(private val apiKey: String) {
         "Write every line in the language that is actually spoken. Do not translate."
     } else {
         "Translate every line into natural, fluent $targetLanguage. If a line is already in $targetLanguage, keep it as spoken."
+    }
+
+    /**
+     * What the user told us about the video (title, character names, spoken language…). This is one of the
+     * biggest accuracy wins: names get spelled right and ambiguous words get the right meaning.
+     */
+    private fun aboutRule(about: String): String {
+        val a = about.trim().take(1500)
+        return if (a.isEmpty()) "" else
+            "Background about this video from the viewer (use it to spell names correctly and choose the right meaning; " +
+                "do not add it as dialogue): $a"
     }
 
     private fun audioPart(clip: File): JSONObject {

@@ -54,6 +54,7 @@ class JobService : Service() {
         val name = intent?.getStringExtra(EXTRA_NAME) ?: ""
         val langIdx = intent?.getIntExtra(EXTRA_LANG, 1) ?: 1
         val fromSpeech = intent?.getBooleanExtra(EXTRA_SPEECH, true) ?: true
+        val about = intent?.getStringExtra(EXTRA_ABOUT) ?: ""
 
         val prefs = Prefs(this)
         val w = Worker(applicationContext, prefs.model, prefs.backupList(), prefs.apiKey, events)
@@ -64,7 +65,7 @@ class JobService : Service() {
         thread(name = "subforge-job") {
             try {
                 if (newJob && video != null) {
-                    val p = w.prepare(video, name, langIdx, fromSpeech, prefs.doubleCheck)
+                    val p = w.prepare(video, name, langIdx, fromSpeech, prefs.doubleCheck, about, prefs.cleanSound)
                     // The previous subtitles go into History (prepare already replaced the saved audio).
                     Project.archiveCurrent(applicationContext, deleteAudio = false)
                     ProjectStore.replace(applicationContext, p)
@@ -248,6 +249,7 @@ class JobService : Service() {
         const val EXTRA_NAME = "name"
         const val EXTRA_LANG = "lang"
         const val EXTRA_SPEECH = "speech"
+        const val EXTRA_ABOUT = "about"
 
         private const val CHANNEL_PROGRESS = "progress"
         private const val CHANNEL_DONE = "done"
@@ -264,12 +266,13 @@ class JobService : Service() {
             )
         }
 
-        fun start(context: Context, video: Uri, name: String, langIdx: Int, fromSpeech: Boolean) {
+        fun start(context: Context, video: Uri, name: String, langIdx: Int, fromSpeech: Boolean, about: String) {
             val i = Intent(context, JobService::class.java).setAction(ACTION_START)
                 .putExtra(EXTRA_VIDEO, video.toString())
                 .putExtra(EXTRA_NAME, name)
                 .putExtra(EXTRA_LANG, langIdx)
                 .putExtra(EXTRA_SPEECH, fromSpeech)
+                .putExtra(EXTRA_ABOUT, about)
             context.startForegroundService(i)
         }
 
