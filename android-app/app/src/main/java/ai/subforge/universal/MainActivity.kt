@@ -45,6 +45,8 @@ class MainActivity : Activity() {
     private lateinit var openLastBtn: Button
     private lateinit var progress: ProgressBar
     private lateinit var status: TextView
+    private lateinit var tryNowBtn: Button
+    private lateinit var batteryNote: TextView
 
     private var videoUri: Uri? = null
     /** Time Start/Continue was tapped; the screen treats the job as running until the service takes over. */
@@ -100,6 +102,9 @@ class MainActivity : Activity() {
             (p.state == Project.STATE_STOPPED || p.state == Project.STATE_PARTIAL ||
                 p.state == Project.STATE_WORKING || p.state == Project.STATE_IMPROVING)
         continueBtn.visibility = if (canContinue) View.VISIBLE else View.GONE
+        tryNowBtn.visibility = if (ProjectStore.running && ProjectStore.waitUntil > 0) View.VISIBLE else View.GONE
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        batteryNote.visibility = if (pm.isIgnoringBatteryOptimizations(packageName)) View.GONE else View.VISIBLE
         if (p != null) {
             continueBtn.text = if (p.todoCount() > 0) "Continue unfinished job (${p.videoName})"
             else "Re-check with the best model (${p.videoName})"
@@ -137,10 +142,17 @@ class MainActivity : Activity() {
         col.addView(langSpinner)
 
         col.addView(CheckBox(this).apply {
-            text = "Double-check every part with the best model (most accurate, uses about twice as many requests)"
+            text = "Double-check with a second listen (most accurate)"
             isChecked = prefs.doubleCheck
             setPadding(0, dp(12), 0, 0)
             setOnCheckedChangeListener { _, on -> prefs.doubleCheck = on }
+        })
+        col.addView(TextView(this).apply {
+            textSize = 13f
+            setPadding(dp(32), 0, 0, 0)
+            text = "Always on: parts made by a backup model (when the best one is busy) are redone by the best model.\n" +
+                "With this ticked: the best model also listens to EVERY part a second time and fixes its own mistakes. " +
+                "Uses about twice as many free requests."
         })
 
         startBtn = button("Start") { start() }
@@ -156,13 +168,26 @@ class MainActivity : Activity() {
         col.addView(status)
         cancelBtn = button("Cancel") { JobService.cancel(this); status.text = "Cancelling…" }.apply { visibility = View.GONE }
         col.addView(cancelBtn)
+        tryNowBtn = button("Try now") { JobService.tryNow(this) }.apply { visibility = View.GONE }
+        col.addView(tryNowBtn)
         continueBtn = button("Continue") { resumeJob() }.apply { visibility = View.GONE }
         col.addView(continueBtn)
 
         col.addView(space(24))
         openLastBtn = button("Open subtitles") { openEditor() }
         col.addView(openLastBtn)
+        col.addView(button("History & storage") { startActivity(Intent(this, HistoryActivity::class.java)) })
         col.addView(button("Settings (Gemini API key, models)") { showSettings() })
+        batteryNote = TextView(this).apply {
+            setPadding(0, dp(16), 0, 0)
+            textSize = 14f
+            setTextColor(android.graphics.Color.rgb(217, 119, 6))
+            text = "⚠ Your phone may pause SubForge in the background, so long jobs can stop or wait forever. " +
+                "Tap here and allow it to run in the background (on Oppo/Realme also: App info → Battery → Allow background activity)."
+            setOnClickListener { openBatterySettings() }
+            visibility = View.GONE
+        }
+        col.addView(batteryNote)
 
         col.addView(TextView(this).apply {
             setPadding(0, dp(20), 0, 0)
@@ -211,7 +236,8 @@ class MainActivity : Activity() {
         val p = if (Project.exists(this)) ProjectStore.get(this) else null
         if (p != null && p.cues.isNotEmpty() && p.state != Project.STATE_DONE) {
             AlertDialog.Builder(this)
-                .setMessage("Starting a new video replaces the unfinished subtitles for \"${p.videoName}\". Continue?")
+                .setMessage("\"${p.videoName}\" is not fully finished. Starting a new video moves its subtitles to History, " +
+                    "and its remaining parts can no longer be re-checked. Continue?")
                 .setPositiveButton("Start new") { _, _ -> startNow(uri) }
                 .setNegativeButton("Keep", null)
                 .show()
@@ -239,6 +265,19 @@ class MainActivity : Activity() {
     }
 
     /** Notifications (Android 13+) and "run in background without limits" so long jobs are not stopped. */
+    /** Asks Android to stop limiting the app; if that screen is missing, opens the app's own settings page. */
+    private fun openBatterySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+        } catch (e: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            } catch (e2: Exception) {
+                toast("Open Settings → Apps → SubForge → Battery and allow background activity")
+            }
+        }
+    }
+
     private fun askPermissionsOnce() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED

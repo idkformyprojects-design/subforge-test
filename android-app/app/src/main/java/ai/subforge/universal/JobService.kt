@@ -5,11 +5,13 @@ import ai.subforge.universal.core.Prefs
 import ai.subforge.universal.core.Project
 import ai.subforge.universal.core.ProjectStore
 import ai.subforge.universal.core.Worker
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -17,6 +19,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import kotlin.concurrent.thread
 
 /**
@@ -35,7 +38,11 @@ class JobService : Service() {
         createChannels(this)
         if (intent?.action == ACTION_CANCEL) {
             worker?.cancel()
-            ProjectStore.status("Cancelling…", ProjectStore.fraction)
+            ProjectStore.status("Stopping…", ProjectStore.fraction)
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_TRY_NOW) {
+            Worker.tryNow()
             return START_NOT_STICKY
         }
         // Must show the notification within a few seconds of being started.
@@ -58,6 +65,8 @@ class JobService : Service() {
             try {
                 if (newJob && video != null) {
                     val p = w.prepare(video, name, langIdx, fromSpeech, prefs.doubleCheck)
+                    // The previous subtitles go into History (prepare already replaced the saved audio).
+                    Project.archiveCurrent(applicationContext, deleteAudio = false)
                     ProjectStore.replace(applicationContext, p)
                 }
                 val finalState = w.run()
@@ -76,6 +85,8 @@ class JobService : Service() {
                 stopped(msg)
                 notifyFinished("SubForge stopped", msg)
             } finally {
+                cancelWakeAlarm()
+                ProjectStore.waitUntil = 0L
                 ProjectStore.running = false
                 worker = null
                 releaseWakeLock()
@@ -106,6 +117,13 @@ class JobService : Service() {
             }
         }
 
+        override fun waiting(untilWallMs: Long) {
+            ProjectStore.waitUntil = untilWallMs
+            if (untilWallMs > 0) setWakeAlarm(untilWallMs - System.currentTimeMillis()) else cancelWakeAlarm()
+            goForeground(ProjectStore.statusText, ProjectStore.fraction)
+            ProjectStore.status(ProjectStore.statusText, ProjectStore.fraction)
+        }
+
         override fun firstPassDone(lines: Int, stillImproving: Boolean) {
             if (stillImproving) {
                 notifyFinished(
@@ -132,6 +150,13 @@ class JobService : Service() {
             .setOnlyAlertOnce(true)
             .setContentIntent(openApp(MainActivity::class.java, 2))
             .addAction(Notification.Action.Builder(null, "Cancel", cancel).build())
+        if (ProjectStore.waitUntil > 0) {
+            val tryNow = PendingIntent.getService(
+                this, 4, Intent(this, JobService::class.java).setAction(ACTION_TRY_NOW),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            b.addAction(Notification.Action.Builder(null, "Try now", tryNow).build())
+        }
         if (fraction >= 0) b.setProgress(1000, (fraction.coerceIn(0.0, 1.0) * 1000).toInt(), false)
         else b.setProgress(0, 0, true)
         val n = b.build()
@@ -167,6 +192,38 @@ class JobService : Service() {
         stopForeground(Service.STOP_FOREGROUND_REMOVE)
     }
 
+    // ------------------------------------------------------------------ wake-up alarm for waits
+
+    /**
+     * Some phones (e.g. Oppo/Realme/Xiaomi) pause background apps even with a notification, so a plain
+     * timer might never finish. A system alarm wakes the phone and the app at the retry time.
+     */
+    private fun setWakeAlarm(inMs: Long) {
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val at = SystemClock.elapsedRealtime() + inMs.coerceAtLeast(1000L)
+        val pi = wakeIntent(this)
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
+                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            } else {
+                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            }
+        } catch (e: SecurityException) {
+            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+        }
+    }
+
+    private fun cancelWakeAlarm() {
+        (getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(wakeIntent(this))
+    }
+
+    /** Receives the wake-up alarm and ends the wait. */
+    class WakeReceiver : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            Worker.tryNow()
+        }
+    }
+
     // ------------------------------------------------------------------ keep the CPU awake while working
 
     private fun acquireWakeLock() {
@@ -186,6 +243,7 @@ class JobService : Service() {
         const val ACTION_START = "ai.subforge.START"
         const val ACTION_CONTINUE = "ai.subforge.CONTINUE"
         const val ACTION_CANCEL = "ai.subforge.CANCEL"
+        const val ACTION_TRY_NOW = "ai.subforge.TRY_NOW"
         const val EXTRA_VIDEO = "video"
         const val EXTRA_NAME = "name"
         const val EXTRA_LANG = "lang"
@@ -218,6 +276,16 @@ class JobService : Service() {
         /** Continues an unfinished job, or re-checks parts that still need the best model. */
         fun resume(context: Context) {
             context.startForegroundService(Intent(context, JobService::class.java).setAction(ACTION_CONTINUE))
+        }
+
+        private fun wakeIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+            context, 5, Intent(context, WakeReceiver::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        /** Ends a wait for the best model right away. */
+        fun tryNow(context: Context) {
+            context.startService(Intent(context, JobService::class.java).setAction(ACTION_TRY_NOW))
         }
 
         fun cancel(context: Context) {

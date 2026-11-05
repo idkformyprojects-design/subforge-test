@@ -108,8 +108,44 @@ class Project(
 
         fun exists(context: Context) = file(context).exists()
 
-        fun load(context: Context): Project? = try {
-            val json = JSONObject(file(context).readText(Charsets.UTF_8))
+        fun load(context: Context): Project? = load(file(context))
+
+        /** Past jobs: one small file of subtitles each, no audio. */
+        fun historyDir(context: Context) = File(context.filesDir, "history").apply { mkdirs() }
+
+        fun history(context: Context): List<File> =
+            historyDir(context).listFiles { f -> f.name.endsWith(".json") }?.sortedByDescending { it.name } ?: emptyList()
+
+        /**
+         * Moves the current subtitles into History (if there are any) and deletes the saved audio,
+         * so a new job can start. Call only when no job is running.
+         */
+        fun archiveCurrent(context: Context, deleteAudio: Boolean = true) {
+            val f = file(context)
+            if (f.exists()) {
+                val p = load(f)
+                if (p != null && p.cues.isNotEmpty()) f.copyTo(File(historyDir(context), "${System.currentTimeMillis()}.json"), true)
+                f.delete()
+            }
+            if (deleteAudio) partsDir(context).deleteRecursively()
+        }
+
+        /** Makes a History entry the current subtitles again (the current ones go into History). */
+        fun restore(context: Context, entry: File): Project? {
+            val p = load(entry) ?: return null
+            archiveCurrent(context)
+            // It has no saved audio any more, so nothing can be re-checked; mark it finished.
+            p.state = STATE_DONE
+            p.message = ""
+            for (part in p.parts) if (part.status == Part.DONE) { part.backup = false; part.reviewed = true }
+            entry.delete()
+            return p
+        }
+
+        fun sizeOf(f: File): Long = if (f.isDirectory) (f.listFiles() ?: emptyArray()).sumOf { sizeOf(it) } else f.length()
+
+        fun load(f: File): Project? = try {
+            val json = JSONObject(f.readText(Charsets.UTF_8))
             val cs = json.getJSONArray("cues")
             val cues = ArrayList<Cue>()
             for (i in 0 until cs.length()) {
@@ -160,9 +196,17 @@ object ProjectStore {
     @Volatile var running = false
     @Volatile var statusText = ""
     @Volatile var fraction = -1.0
+    /** When the job is waiting for the best model: the clock time of the next try, else 0. */
+    @Volatile var waitUntil = 0L
 
     fun get(context: Context): Project? = synchronized(this) {
         current ?: Project.load(context.applicationContext).also { current = it }
+    }
+
+    /** Drops the cached copy (after the current project was moved to History). */
+    fun forget() {
+        synchronized(this) { current = null }
+        changed()
     }
 
     fun replace(context: Context, p: Project) {

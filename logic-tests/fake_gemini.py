@@ -24,7 +24,16 @@ class H(BaseHTTPRequestHandler):
             c = STATE["cfg"].get(model, {})
             n = sum(1 for x in STATE["calls"] if x[0] == model) + 1
             STATE["calls"].append([model, kind])
+        if c.get("delay"):
+            import time; time.sleep(c["delay"])
         if c.get("missing"): return reply(self, 404, {"error": {"message": f"models/{model} is not found"}})
+        if c.get("daily"):
+            return reply(self, 429, {"error": {"code": 429, "message": "You exceeded your current quota.", "details": [
+                {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}})
+        if n <= c.get("rpm_busy", 0):
+            return reply(self, 429, {"error": {"code": 429, "message": "Rate limit.", "details": [
+                {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]},
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "1.5s"}]}})
         if n <= c.get("busy", 0): return reply(self, 503, {"error": {"message": "This model is currently experiencing high demand."}})
         if kind == "transcribe":
             out = [{"start": 1.0 + 10*i, "end": 3.0 + 10*i, "text": f"line {i} by {model}"} for i in range(2)]

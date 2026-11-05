@@ -121,6 +121,71 @@ fun main() {
         loaded.cues == before.cues && loaded.parts.size == 3 && loaded.parts.all { it.status == Part.DONE && it.reviewed } &&
             loaded.doubleCheck && loaded.state == before.state, loaded.cues)
 
+    println("11. Best model's daily free limit used up: no pointless waiting, backup used, clear message")
+    Worker.roundWaitMs = 60_000
+    control("""{"best":{"daily":true}}"""); c = ctx(); ev = Ev()
+    var t1 = System.currentTimeMillis(); st = job(c, ev).run(); p = ProjectStore.get(c)!!
+    check("finished quickly (no 2-minute waits)", System.currentTimeMillis() - t1 < 5000, System.currentTimeMillis() - t1)
+    check("state partial", st == Project.STATE_PARTIAL, st)
+    check("all lines from backup", p.cues.all { it.text.endsWith("by flash-latest") }, p.cues)
+    check("best model asked only once", calls().count { it.first == "best" } == 1, calls())
+    check("message says daily limit, re-check tomorrow", p.message.contains("daily limit") && p.message.contains("tomorrow"), p.message)
+    check("audio kept for re-check later", Project.partsDir(c).listFiles()?.size == 3)
+
+    println("12. Per-minute limit with Google's wait hint (1.5 s): waits as told, then best model")
+    control("""{"best":{"rpm_busy":1}}"""); c = ctx(); ev = Ev()
+    t1 = System.currentTimeMillis(); st = job(c, ev).run(); p = ProjectStore.get(c)!!
+    val took = System.currentTimeMillis() - t1
+    check("waited about 1.5 s, not the short default", took >= 1400 && took < 6000, took)
+    check("everything by best", st == Project.STATE_DONE && p.cues.all { it.text.endsWith("by best") }, p.cues)
+
+    println("13. Cancel in the middle of a slow request stops at once")
+    control("""{"best":{"delay":20}}"""); c = ctx(); ev = Ev()
+    val w13 = job(c, ev); var err13: Throwable? = null
+    val t13 = Thread { try { w13.run() } catch (e: Throwable) { err13 = e } }; t13.start()
+    Thread.sleep(800); t1 = System.currentTimeMillis(); w13.cancel(); t13.join(5000)
+    check("stopped within 1 second (request was going to take 20 s)", !t13.isAlive && System.currentTimeMillis() - t1 < 1000, System.currentTimeMillis() - t1)
+    check("reported as Cancelled", err13 is GeminiCancelledException, err13)
+    Thread.sleep(300)
+
+    println("14. 'Try now' ends a long wait immediately; 'next try at' time is shown")
+    Worker.roundWaitMs = 600_000; Worker.improveMs = 3_600_000
+    control("""{"best":{"busy":6}}"""); c = ctx()
+    var waitedUntil = 0L
+    val ev14 = object : Worker.Events {
+        override fun progress(text: String, fraction: Double) {}
+        override fun firstPassDone(lines: Int, stillImproving: Boolean) {}
+        override fun waiting(untilWallMs: Long) { if (untilWallMs > 0) waitedUntil = untilWallMs }
+    }
+    val w14 = Worker(c, MAIN, BACKUPS, "TESTKEY", ev14)
+    ProjectStore.replace(c, w14.prepare(Uri.parse("content://video/1"), "movie.mp4", 1, true, false))
+    control("""{"best":{"busy":999}}""")
+    val t14 = Thread { w14.run() }; t14.start()
+    var spins = 0; while (waitedUntil == 0L && spins++ < 100) Thread.sleep(100)
+    check("waiting reported with a next-try time ~10 min ahead", waitedUntil - System.currentTimeMillis() in 500_000..600_000, waitedUntil - System.currentTimeMillis())
+    control("{}"); t1 = System.currentTimeMillis(); Worker.tryNow(); t14.join(10_000)
+    check("finished right after Try now", !t14.isAlive && System.currentTimeMillis() - t1 < 5000, System.currentTimeMillis() - t1)
+    p = ProjectStore.get(c)!!
+    check("and everything is now by the best model", p.cues.all { it.text.endsWith("by best") }, p.cues)
+    Worker.roundWaitMs = 200; Worker.improveMs = 3000
+
+    println("15. Saved audio is deleted automatically when the job is fully done")
+    control("{}"); c = ctx(); ev = Ev(); st = job(c, ev).run()
+    check("done and audio folder gone", st == Project.STATE_DONE && !Project.partsDir(c).exists(), Project.partsDir(c).listFiles()?.size)
+
+    println("16. History: previous subtitles kept when a new job starts; can be reopened")
+    Project.archiveCurrent(c)
+    check("current moved to history", !Project.exists(c) && Project.history(c).size == 1)
+    ProjectStore.forget()
+    control("{}"); ev = Ev(); job(c, ev).run()
+    Project.archiveCurrent(c, deleteAudio = false); ProjectStore.forget()
+    check("two entries in history", Project.history(c).size == 2)
+    val entry = Project.history(c).last()
+    val restored = Project.restore(c, entry)!!
+    ProjectStore.replace(c, restored)
+    check("reopened entry is current, finished, with its lines", ProjectStore.get(c)!!.cues.size == 6 && restored.state == Project.STATE_DONE)
+    check("history now holds the other one", Project.history(c).size == 1)
+
     println(if (failures == 0) "\nALL SCENARIOS PASSED" else "\n$failures CHECK(S) FAILED")
     if (failures > 0) System.exit(1)
 }

@@ -1,4 +1,4 @@
-# SubForge (v1.2.1)
+# SubForge (v1.3.0)
 
 Android app that makes subtitles for any video, in any language, using your own **free** Google Gemini key.
 
@@ -15,6 +15,16 @@ Android app that makes subtitles for any video, in any language, using your own 
    - Burn subtitles into the picture (slow, but shows on every player, WhatsApp, etc.)
 
 The video never leaves the phone. Only the sound goes to Gemini.
+
+### New in v1.3.0
+- **Waits can't get stuck any more.** Retries use the real clock plus a system wake-up alarm, so phones that pause
+  background apps (Oppo/Realme/Xiaomi) still retry on time. The app and notification show "Next try at …" and a **Try now** button.
+- **Respects Google's limits.** Uses Google's own "wait N seconds" hint for the per-minute limit, and stops waiting at once
+  when the best model's **daily** free limit is used up ("re-check tomorrow").
+- **Cancel is instant**, even in the middle of a request.
+- **Storage:** saved audio is deleted automatically when a job is fully done. **History & storage** screen: past subtitles
+  (reopen, edit, export), space used, Clear saved audio, Clear history.
+- Clearer double-check option, and a reminder when the phone is limiting background work.
 
 ### New in v1.2.0
 - **Runs in the background** with a progress notification and a Cancel button. Lock the phone or use other apps.
@@ -69,7 +79,8 @@ android-app/app/src/main/java/ai/subforge/universal/
   core/Gemini.kt       Gemini calls (transcribe audio clip, translate lines), retries + free-tier pacing
   JobService.kt        background service: notifications, cancel, wake lock
   core/Worker.kt       the job: parts, best/backup models, re-check, double-check, continue
-  core/Project.kt      the saved project (parts + lines) and the shared ProjectStore
+  core/Project.kt      the saved project (parts + lines), History, and the shared ProjectStore
+  HistoryActivity.kt   past subtitles and storage clean-up
   core/Cue.kt          subtitle line + SRT read/write
   core/Prefs.kt        settings + language list
 logic-tests/           runs the job logic against a fake Gemini server (bash logic-tests/run.sh)

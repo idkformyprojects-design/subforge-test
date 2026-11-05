@@ -12,7 +12,10 @@ import java.net.URLEncoder
 open class GeminiException(message: String) : IOException(message)
 
 /** The model is overloaded or the per-minute/day limit is hit (HTTP 429/5xx, network). Worth trying later or another model. */
-class GeminiBusyException(message: String) : GeminiException(message)
+open class GeminiBusyException(message: String) : GeminiException(message)
+
+/** The free daily limit for this model is used up (HTTP 429 with a per-day quota). Waiting minutes will not help. */
+class GeminiDailyLimitException(message: String) : GeminiBusyException(message)
 
 /** This model name does not exist (any more) for this key (HTTP 404). Skip it. */
 class GeminiMissingModelException(message: String) : GeminiException(message)
@@ -26,7 +29,14 @@ class GeminiCancelledException : GeminiException("Cancelled")
 class Gemini(private val apiKey: String) {
 
     @Volatile var cancelled = false
+    @Volatile private var current: HttpURLConnection? = null
     private var lastCallAt = 0L
+
+    /** Stops at once, even in the middle of a request (otherwise Cancel could wait minutes for Google). */
+    fun abort() {
+        cancelled = true
+        try { current?.disconnect() } catch (e: Exception) { }
+    }
 
     // ------------------------------------------------------------------ jobs
 
@@ -175,6 +185,8 @@ class Gemini(private val apiKey: String) {
             checkCancelled()
             pace()
             val conn = url.openConnection() as HttpURLConnection
+            current = conn
+            var waitMs = retryWaitMs * attempt
             try {
                 conn.requestMethod = "POST"
                 conn.connectTimeout = 30_000
@@ -191,17 +203,26 @@ class Gemini(private val apiKey: String) {
                 lastError = "HTTP $code: " + errorMessage(text)
                 when (code) {
                     404 -> throw GeminiMissingModelException("$model: $lastError")
-                    408, 429, 500, 502, 503, 504 -> { /* busy: retry below */ }
+                    429 -> {
+                        if (isDailyLimit(text)) throw GeminiDailyLimitException("$model: daily free limit reached ($lastError)")
+                        // Google says how long to wait for the per-minute limit; respect it.
+                        val hint = retryDelayMs(text)
+                        if (hint > MAX_RETRY_HINT_MS) throw GeminiBusyException("$model is busy ($lastError)")
+                        if (hint > waitMs) waitMs = hint
+                    }
+                    408, 500, 502, 503, 504 -> { /* busy: retry below */ }
                     else -> throw GeminiException(lastError)
                 }
             } catch (e: GeminiException) {
                 throw e
             } catch (e: IOException) {
+                checkCancelled() // a Cancel closes the connection; report it as Cancelled, not as a network error
                 lastError = "Network error: ${e.message}"
             } finally {
+                current = null
                 conn.disconnect()
             }
-            if (attempt < tries) sleepChecked(retryWaitMs * attempt)
+            if (attempt < tries) sleepChecked(waitMs)
         }
         throw GeminiBusyException("$model is busy ($lastError)")
     }
@@ -264,7 +285,37 @@ class Gemini(private val apiKey: String) {
         @Volatile var retryWaitMs = 20_000L
         @Volatile var minGapMs = 7_000L
 
+        private const val MAX_RETRY_HINT_MS = 90_000L
+
         private fun round2(v: Double) = Math.round(v * 100.0) / 100.0
+
+        /** True when a 429 answer is about the per-day quota (e.g. "GenerateRequestsPerDayPerProjectPerModel-FreeTier"). */
+        fun isDailyLimit(body: String): Boolean = try {
+            val details = JSONObject(body).getJSONObject("error").optJSONArray("details") ?: JSONArray()
+            var daily = false
+            for (i in 0 until details.length()) {
+                val v = details.optJSONObject(i)?.optJSONArray("violations") ?: continue
+                for (k in 0 until v.length()) {
+                    if (v.optJSONObject(k)?.optString("quotaId")?.contains("PerDay", ignoreCase = true) == true) daily = true
+                }
+            }
+            daily
+        } catch (e: Exception) {
+            false
+        }
+
+        /** Reads Google's suggested wait ("retryDelay": "37s") from a 429 answer, in ms; 0 if none. */
+        fun retryDelayMs(body: String): Long = try {
+            val details = JSONObject(body).getJSONObject("error").optJSONArray("details") ?: JSONArray()
+            var ms = 0L
+            for (i in 0 until details.length()) {
+                val d = details.optJSONObject(i)?.optString("retryDelay") ?: ""
+                if (d.endsWith("s")) ms = maxOf(ms, (d.dropLast(1).toDoubleOrNull()?.times(1000))?.toLong() ?: 0L)
+            }
+            ms
+        } catch (e: Exception) {
+            0L
+        }
 
         /** Removes ```json fences if the model added them anyway. */
         fun cleanJson(text: String): String {

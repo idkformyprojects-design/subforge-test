@@ -2,6 +2,7 @@ package ai.subforge.universal.core
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import java.io.File
 
 /**
@@ -23,17 +24,27 @@ class Worker(
         fun progress(text: String, fraction: Double)
         /** Every part has subtitles; the user can start editing. [stillImproving] = re-checks are coming. */
         fun firstPassDone(lines: Int, stillImproving: Boolean)
+        /**
+         * The job is about to wait until [untilWallMs] (0 = the wait is over). The service uses this to
+         * set a wake-up alarm, because some phones pause background apps and a plain timer would never fire.
+         */
+        fun waiting(untilWallMs: Long) {}
     }
 
     private val gemini = Gemini(apiKey)
     @Volatile private var cancelled = false
     private var mainBusy = false     // after the best model is busy once, do not wait long for it on every part
     private var mainMissing = false  // the best model's name does not exist for this key
+    private var mainExhausted = false // the best model's free daily limit is used up
+
+    /** The best model cannot be used any more during this run (missing or daily limit). */
+    private val mainBlocked get() = mainMissing || mainExhausted
 
     fun cancel() {
         cancelled = true
-        gemini.cancelled = true
+        gemini.abort()
         Media.cancelAll()
+        wakeNow = true
     }
 
     private fun check() {
@@ -122,31 +133,33 @@ class Worker(
                 } catch (e: GeminiBusyException) {
                     // still busy; try again next round
                 }
-                if (mainMissing) break
             }
-            if (pendingTasks().isEmpty() || mainMissing) break
+            if (pendingTasks().isEmpty()) break
             if (System.currentTimeMillis() > deadline) break
             val left = pendingTasks().size
-            events.progress("The best model is busy. Trying again in 2 minutes ($left part(s) left)…", 0.8)
-            gemini.sleepChecked(roundWaitMs)
+            waitRound(roundWaitMs, left)
         }
 
         // ---- final state
-        val left = pendingTasks().size
         val todo = p.todoCount()
+        val needBest = needsBestCount()
         val finalState = when {
             todo > 0 -> Project.STATE_STOPPED
-            left > 0 -> Project.STATE_PARTIAL
+            needBest > 0 -> Project.STATE_PARTIAL
             else -> Project.STATE_DONE
         }
         val msg = when {
             todo > 0 -> "$todo part(s) could not be done because Gemini was busy. Tap Continue later."
-            mainMissing -> "Your main model \"$mainModel\" was not found, so backup models were used. Check the model name in Settings."
-            left > 0 -> "$left part(s) still need checking by the best model. Tap Re-check later."
+            mainMissing -> "Your best model \"$mainModel\" was not found, so backup models were used. Check the model name in Settings."
+            mainExhausted && needBest > 0 ->
+                "The best model's free daily limit is used up, so $needBest part(s) were made by a backup model. Tap Re-check tomorrow."
+            needBest > 0 -> "$needBest part(s) still need checking by the best model. Tap Re-check later."
             p.doubleCheck && p.fromSpeech -> "All parts made and double-checked by the best model."
             else -> "All parts made by the best model."
         }
         ProjectStore.edit(context) { it.state = finalState; it.message = msg }
+        // The saved audio is only needed for re-checks; once everything is done it is just using space.
+        if (finalState == Project.STATE_DONE && p.fromSpeech) Project.partsDir(context).deleteRecursively()
         if (!firstPassComplete && todo == 0) events.firstPassDone(p.cues.size, false)
         return finalState
     }
@@ -169,7 +182,7 @@ class Worker(
                 val n = part.index + 1
                 when {
                     part.status != Part.DONE -> out.add(Task(part, Task.FILL, "Writing subtitles: part $n"))
-                    mainMissing || p.partHasEdits(part) -> { /* leave the user's edits alone */ }
+                    mainBlocked || p.partHasEdits(part) -> { /* leave the user's edits alone */ }
                     part.backup -> out.add(Task(part, Task.REDO, "Re-checking part $n with the best model"))
                     p.doubleCheck && p.fromSpeech && !part.reviewed ->
                         out.add(Task(part, Task.REVIEW, "Double-checking part $n"))
@@ -178,6 +191,41 @@ class Worker(
         }
         return out
     }
+
+    /** Parts that still need the best model (made by a backup, or not yet double-checked), ignoring hand-edited ones. */
+    private fun needsBestCount(): Int {
+        val p = ProjectStore.get(context) ?: return 0
+        return synchronized(ProjectStore) {
+            p.parts.count { part ->
+                part.status == Part.DONE && !p.partHasEdits(part) &&
+                    (part.backup || (p.doubleCheck && p.fromSpeech && !part.reviewed))
+            }
+        }
+    }
+
+    /**
+     * Waits before the next round of tries. Uses the real clock (which keeps counting while the phone sleeps),
+     * checks twice a second, and ends early on Cancel or "Try now".
+     */
+    private fun waitRound(ms: Long, left: Int) {
+        val untilWall = System.currentTimeMillis() + ms
+        val untilReal = SystemClock.elapsedRealtime() + ms
+        wakeNow = false
+        events.progress("The best model is busy. Next try at ${clock(untilWall)} ($left part(s) left)…", 0.8)
+        events.waiting(untilWall)
+        try {
+            while (SystemClock.elapsedRealtime() < untilReal && !wakeNow) {
+                check()
+                Thread.sleep(500)
+            }
+        } finally {
+            events.waiting(0)
+        }
+        check()
+    }
+
+    private fun clock(wallMs: Long): String =
+        java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(wallMs))
 
     private fun allModels(): List<String> = listOf(mainModel) + backups.filter { it != mainModel }
 
@@ -192,7 +240,7 @@ class Worker(
         for (model in models) {
             check()
             val isMain = model == mainModel
-            if (isMain && mainMissing) continue
+            if (isMain && mainBlocked) continue
             val attempts = when {
                 !isMain -> BACKUP_ATTEMPTS
                 firstPass && mainBusy -> 1      // do not wait long for a busy main model on every part
@@ -227,6 +275,7 @@ class Worker(
                 if (isMain) mainMissing = true
             } catch (e: GeminiBusyException) {
                 if (isMain) mainBusy = true
+                if (isMain && e is GeminiDailyLimitException) mainExhausted = true
             }
         }
         if (models.size == 1) throw GeminiBusyException("$mainModel is busy")
@@ -258,6 +307,9 @@ class Worker(
             gemini.review(mainModel, clip, current, target, IMPROVE_ATTEMPTS)
         } catch (e: GeminiMissingModelException) {
             mainMissing = true
+            return
+        } catch (e: GeminiDailyLimitException) {
+            mainExhausted = true
             return
         }
         val oldMarks = HashMap<String, Int>()
@@ -301,6 +353,13 @@ class Worker(
         // How long to keep waiting for the best model, and the pause between tries (changeable for tests).
         @Volatile var improveMs = 45 * 60_000L
         @Volatile var roundWaitMs = 120_000L
+
+        /** Set by "Try now" (notification or app) or the wake-up alarm, to end a wait early. */
+        @Volatile var wakeNow = false
+
+        fun tryNow() {
+            wakeNow = true
+        }
 
         /** Sorts lines and trims overlaps that can appear at part borders. */
         fun tidy(cues: MutableList<Cue>) {

@@ -2,13 +2,16 @@
 
 Read this before changing anything.
 
-## State (v1.2.0)
+## State (v1.3.0)
 - The app was rewritten with plain Android Views + FFmpegKit only. All Kotlin compiles against the
   real android-34 API and the real FFmpegKit classes (extracted from the earlier APK). SRT logic is unit-tested.
   All FFmpeg commands were tested on a sample video with desktop FFmpeg, including Bengali/Arabic burn-in.
 - v1.1.0 was installed and run on the owner's phone: picking video, audio extraction and Gemini calls work.
 - v1.2.0 adds the background service, backup models, automatic re-check and double-check.
   The job logic is tested with logic-tests/ (10 scenarios against a fake Gemini server). Run it after every change.
+- v1.3.0: fixed waits stuck on phones that pause background apps (real-clock wait + AlarmManager wake-up + Try now),
+  Google retryDelay and daily-quota handling, instant cancel, auto-delete audio, History screen. logic-tests: 16 scenarios.
+- The repository moved to idkformyprojects-design/subforge-test (the old "subforge" repo stopped accepting any writes).
 - Signing: the owner's release key is NOT in the repo. Until the 4 GitHub secrets are added, CI APKs are
   debug-signed and must be re-signed with the owner's key before they install over the current app.
 
