@@ -47,6 +47,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
 
     private var videoUri: Uri? = null
+    /** Time Start/Continue was tapped; the screen treats the job as running until the service takes over. */
+    private var startingAt = 0L
     private val onChange = Runnable { refresh() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,12 +77,17 @@ class MainActivity : Activity() {
 
     /** Shows the live state of the background job. */
     private fun refresh() {
-        val running = ProjectStore.running
+        if (ProjectStore.running) startingAt = 0L
+        val starting = startingAt > 0 && System.currentTimeMillis() - startingAt < 8000
+        val running = ProjectStore.running || starting
         val p = if (Project.exists(this)) ProjectStore.get(this) else null
         startBtn.isEnabled = !running
         cancelBtn.visibility = if (running) View.VISIBLE else View.GONE
         progress.visibility = if (running) View.VISIBLE else View.GONE
-        if (running) {
+        if (starting && !ProjectStore.running) {
+            progress.isIndeterminate = true
+            status.text = "Starting…"
+        } else if (running) {
             val f = ProjectStore.fraction
             progress.isIndeterminate = f < 0
             if (f >= 0) progress.progress = (f * 1000).toInt()
@@ -218,19 +225,17 @@ class MainActivity : Activity() {
         val langIdx = langSpinner.selectedItemPosition
         prefs.languageIndex = langIdx
         val fromSpeech = modeGroup.checkedRadioButtonId == MODE_SPEECH
-        ProjectStore.status("Starting…", -1.0)
+        startingAt = System.currentTimeMillis()
         JobService.start(this, uri, Media.displayName(this, uri), langIdx, fromSpeech)
-        startBtn.isEnabled = false // the service takes over a moment later and updates the screen
-        status.text = "Starting…"
+        refresh()
     }
 
     private fun resumeJob() {
         if (prefs.apiKey.isBlank()) return showSettings()
         askPermissionsOnce()
-        ProjectStore.status("Continuing…", -1.0)
+        startingAt = System.currentTimeMillis()
         JobService.resume(this)
-        continueBtn.visibility = View.GONE
-        status.text = "Continuing…"
+        refresh()
     }
 
     /** Notifications (Android 13+) and "run in background without limits" so long jobs are not stopped. */

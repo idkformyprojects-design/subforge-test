@@ -1,4 +1,4 @@
-# SubForge (v1.2.0)
+# SubForge (v1.2.1)
 
 Android app that makes subtitles for any video, in any language, using your own **free** Google Gemini key.
 

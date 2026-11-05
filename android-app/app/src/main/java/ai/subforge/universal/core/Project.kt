@@ -185,11 +185,31 @@ object ProjectStore {
         return r
     }
 
+    @Volatile private var lastStatusPost = 0L
+    @Volatile private var statusPending = false
+
+    /**
+     * Updates the live status. Progress can arrive many times a second (FFmpeg), so the screens are
+     * refreshed at most 4 times a second; the latest status is always delivered.
+     */
     fun status(text: String, f: Double) {
         statusText = text
         fraction = f
-        changed()
+        val now = System.currentTimeMillis()
+        if (now - lastStatusPost >= STATUS_GAP_MS) {
+            lastStatusPost = now
+            changed()
+        } else if (!statusPending) {
+            statusPending = true
+            main.postDelayed({
+                statusPending = false
+                lastStatusPost = System.currentTimeMillis()
+                for (l in listeners) l.run()
+            }, STATUS_GAP_MS)
+        }
     }
+
+    private const val STATUS_GAP_MS = 250L
 
     fun addListener(l: Runnable) = listeners.add(l)
     fun removeListener(l: Runnable) = listeners.remove(l)
