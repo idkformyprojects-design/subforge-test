@@ -1,0 +1,62 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face { font-family: "NotoBn"; src: local("Noto Sans Bengali"); font-weight: 100 900; }
+@font-face { font-family: "NotoHi"; src: local("Noto Sans Devanagari"); font-weight: 100 900; }
+* { box-sizing: border-box; margin: 0; }
+body { width: 1024px; height: 500px; overflow: hidden; font-family: Inter, sans-serif; }
+.bg { position: absolute; inset: 0; background: linear-gradient(135deg, #312E81 0%, #4F46E5 48%, #7C3AED 100%); }
+.glow { position: absolute; border-radius: 50%; filter: blur(2px); }
+.left { position: absolute; left: 64px; top: 112px; width: 440px; color: #fff; }
+.brand { display: flex; align-items: center; gap: 18px; }
+.brand img { width: 84px; height: 84px; border-radius: 20px; box-shadow: 0 0 0 3px rgba(255,255,255,.85), 0 12px 30px rgba(15,10,60,.4); }
+.name { font-size: 56px; font-weight: 800; letter-spacing: -1.5px; }
+.tag { margin-top: 26px; font-size: 32px; line-height: 1.22; font-weight: 700; letter-spacing: -0.5px; }
+.sub { margin-top: 16px; font-size: 19px; line-height: 1.4; color: #E0E7FF; font-weight: 500; }
+.frame { position: absolute; left: 556px; top: 70px; width: 404px; height: 236px; border-radius: 18px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(15,10,60,.45); border: 3px solid rgba(255,255,255,.9); }
+.frame svg { position: absolute; inset: 0; }
+.play { position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%); width: 58px; height: 58px; border-radius: 50%;
+  background: rgba(255,255,255,.88); display: flex; align-items: center; justify-content: center; }
+.play:after { content: ""; margin-left: 5px; border-left: 20px solid #4F46E5; border-top: 12px solid transparent; border-bottom: 12px solid transparent; }
+.subt { position: absolute; left: 0; right: 0; bottom: 16px; text-align: center; }
+.subt span { font-family: NotoBn; font-size: 22px; font-weight: 600; color: #fff; background: rgba(10,8,30,.72);
+  padding: 5px 14px 7px; border-radius: 8px; }
+.card { position: absolute; background: #fff; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center; gap: 12px;
+  box-shadow: 0 14px 34px rgba(15,10,60,.35); white-space: nowrap; }
+.code { font-size: 13px; font-weight: 800; color: #fff; background: #4F46E5; border-radius: 6px; padding: 4px 7px; letter-spacing: .5px; }
+.code.v { background: #7C3AED; }
+.t { font-size: 20px; font-weight: 600; color: #1E1B4B; }
+.t.hi { font-family: NotoHi; font-size: 21px; }
+.spark { position: absolute; }
+</style></head>
+<body>
+<div class="bg"></div>
+<div class="glow" style="left:-120px;top:300px;width:420px;height:420px;background:radial-gradient(circle,rgba(167,139,250,.35),transparent 65%)"></div>
+<div class="glow" style="left:700px;top:-160px;width:460px;height:460px;background:radial-gradient(circle,rgba(129,140,248,.35),transparent 65%)"></div>
+
+<div class="left">
+  <div class="brand"><img src="icon_play.svg"><div class="name">SubForge</div></div>
+  <div class="tag">AI subtitles for any video,<br>in any language</div>
+  <div class="sub">Write, translate, edit and burn in subtitles.<br>Free with your own Google key.</div>
+</div>
+
+<div class="frame">
+  <svg viewBox="0 0 404 236" width="404" height="236" preserveAspectRatio="none">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1E3A8A"/><stop offset=".55" stop-color="#7C3AED"/><stop offset="1" stop-color="#F59E0B"/></linearGradient>
+    </defs>
+    <rect width="404" height="236" fill="url(#sky)"/>
+    <circle cx="300" cy="150" r="38" fill="#FCD34D" opacity=".9"/>
+    <path d="M0,170 C70,130 130,150 190,165 C250,180 310,140 404,150 L404,236 L0,236 Z" fill="#312E81"/>
+    <path d="M0,200 C90,175 170,195 240,205 C310,215 360,190 404,195 L404,236 L0,236 Z" fill="#1E1B4B"/>
+  </svg>
+  <div class="play"></div>
+  <div class="subt"><span>আমি তোমাকে কখনো ভুলব না</span></div>
+</div>
+
+<div class="card" style="left:600px;top:330px"><span class="code">EN</span><span class="t">I will never forget you</span></div>
+<div class="card" style="left:660px;top:404px"><span class="code v">HI</span><span class="t hi">मैं तुम्हें कभी नहीं भूलूँगा</span></div>
+
+<svg class="spark" style="left:944px;top:44px" width="52" height="52" viewBox="0 0 20 20"><path d="M10,0 Q10,10 20,10 Q10,10 10,20 Q10,10 0,10 Q10,10 10,0 z" fill="#FBBF24"/></svg>
+</body></html>

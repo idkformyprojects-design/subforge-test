@@ -31,6 +31,10 @@ class EditorActivity : Activity() {
     private lateinit var adapter: CueAdapter
     private lateinit var info: TextView
     private lateinit var recheckBtn: Button
+    private lateinit var list: ListView
+    private var video: VideoPanel? = null
+    /** Index (in rows) of the line currently showing in the video, -1 = none. */
+    private var playingIndex = -1
     private var rows: List<Cue> = emptyList()
     private var pendingExport: Media.Export? = null
     private var exporting = false
@@ -58,6 +62,14 @@ class EditorActivity : Activity() {
         bar.addView(barButton("Shift time") { shiftAll() })
         root.addView(bar)
 
+        // Video preview with the subtitles drawn on top; tap a line to play from it.
+        try {
+            video = VideoPanel(this, p.videoUri, { rows }) { i -> onPlayingLine(i) }
+        } catch (e: Exception) {
+            video = null
+        }
+        video?.let { root.addView(it.view, 0) }
+
         info = TextView(this).apply { setPadding(dp(12), dp(6), dp(12), dp(2)); textSize = 13f }
         root.addView(info)
         recheckBtn = Button(this).apply {
@@ -69,34 +81,68 @@ class EditorActivity : Activity() {
         root.addView(recheckBtn)
 
         adapter = CueAdapter()
-        val list = ListView(this).apply {
+        list = ListView(this).apply {
             adapter = this@EditorActivity.adapter
-            setOnItemClickListener { _, _, pos, _ -> rows.getOrNull(pos)?.let { editCue(it) } }
+            setOnItemClickListener { _, _, pos, _ ->
+                val c = rows.getOrNull(pos) ?: return@setOnItemClickListener
+                val v = video
+                if (v != null && v.ready && !videoHidden) v.seekTo(c.start, play = true) else editCue(c)
+            }
+            setOnItemLongClickListener { _, _, pos, _ -> rows.getOrNull(pos)?.let { editCue(it) }; true }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         }
         root.addView(list)
-        Screen.show(this, p.videoName.ifBlank { "Subtitles" }, root)
+        val actions = if (video != null) listOf(Screen.Action("Video") { toggleVideo() }) else emptyList()
+        Screen.show(this, p.videoName.ifBlank { "Subtitles" }, root, actions)
+    }
+
+    private var videoHidden = false
+
+    private fun toggleVideo() {
+        val v = video ?: return
+        videoHidden = !videoHidden
+        if (videoHidden) v.pause()
+        v.view.visibility = if (videoHidden) View.GONE else View.VISIBLE
+        refresh()
+    }
+
+    /** Highlights the spoken line and keeps it in view while the video plays. */
+    private fun onPlayingLine(i: Int) {
+        playingIndex = i
+        adapter.notifyDataSetChanged()
+        if (i >= 0 && (i < list.firstVisiblePosition || i > list.lastVisiblePosition)) {
+            list.smoothScrollToPosition(i)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        video?.release()
     }
 
     override fun onResume() {
         super.onResume()
         ProjectStore.addListener(onChange)
         refresh()
+        video?.start()
     }
 
     override fun onPause() {
         super.onPause()
         ProjectStore.removeListener(onChange)
+        video?.pause()
     }
 
     private fun refresh() {
         val p = project() ?: return
         rows = synchronized(ProjectStore) { p.cues.toList() }
         adapter.notifyDataSetChanged()
+        video?.refreshLine()
 
         val backup = rows.count { it.mark == Cue.MARK_BACKUP }
         val fixed = rows.count { it.mark == Cue.MARK_FIXED }
-        val sb = StringBuilder("${rows.size} lines · ${p.language.name} · tap a line to edit it")
+        val hint = if (video != null && !videoHidden) "tap a line to play it, hold to edit" else "tap a line to edit it"
+        val sb = StringBuilder("${rows.size} lines · ${p.language.name} · $hint")
         if (fixed > 0) sb.append("\n✓ $fixed line(s) corrected by the best model")
         if (backup > 0) sb.append("\n⚠ $backup line(s) made by a backup model")
         if (ProjectStore.running) sb.append("\n⟳ ").append(ProjectStore.statusText)
@@ -357,6 +403,7 @@ class EditorActivity : Activity() {
                 addView(TextView(this@EditorActivity).apply { textSize = 12f })
             }
             val c = rows[position]
+            row.setBackgroundColor(if (position == playingIndex) Color.argb(40, 79, 70, 229) else Color.TRANSPARENT)
             (row.getChildAt(0) as TextView).text = "${position + 1}   ${Srt.ts(c.start)} → ${Srt.ts(c.end)}"
             (row.getChildAt(1) as TextView).text = c.text
             val tag = row.getChildAt(2) as TextView

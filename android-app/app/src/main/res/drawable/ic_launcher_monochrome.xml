@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-colour version for Android 13+ themed icons: the card with the play button and subtitle bars cut out. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:fillType="evenOdd"
+        android:pathData="M35,36 h38 a7,7 0 0 1 7,7 v22 a7,7 0 0 1 -7,7 h-38 a7,7 0 0 1 -7,-7 v-22 a7,7 0 0 1 7,-7 z M46,40.5 L46,49.5 L54,45 z M37.5,54 h33.0 a2.5,2.5 0 0 1 2.5,2.5 v0.0 a2.5,2.5 0 0 1 -2.5,2.5 h-33.0 a2.5,2.5 0 0 1 -2.5,-2.5 v-0.0 a2.5,2.5 0 0 1 2.5,-2.5 z M43.5,62 h21.0 a2.5,2.5 0 0 1 2.5,2.5 v0.0 a2.5,2.5 0 0 1 -2.5,2.5 h-21.0 a2.5,2.5 0 0 1 -2.5,-2.5 v-0.0 a2.5,2.5 0 0 1 2.5,-2.5 z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M75,30.5 Q75,39 83.5,39 Q75,39 75,47.5 Q75,39 66.5,39 Q75,39 75,30.5 z"/>
+</vector>
