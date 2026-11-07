@@ -2,7 +2,7 @@
 
 Read this before changing anything.
 
-## State (v1.3.0)
+## State (v1.6.0)
 - The app was rewritten with plain Android Views + FFmpegKit only. All Kotlin compiles against the
   real android-34 API and the real FFmpegKit classes (extracted from the earlier APK). SRT logic is unit-tested.
   All FFmpeg commands were tested on a sample video with desktop FFmpeg, including Bengali/Arabic burn-in.
@@ -11,6 +11,9 @@ Read this before changing anything.
   The job logic is tested with logic-tests/ (10 scenarios against a fake Gemini server). Run it after every change.
 - v1.3.0: fixed waits stuck on phones that pause background apps (real-clock wait + AlarmManager wake-up + Try now),
   Google retryDelay and daily-quota handling, instant cancel, auto-delete audio, History screen. logic-tests: 16 scenarios.
+- v1.6.0: targetSdk 36 / AGP 8.10.1; Screen.kt header handles edge-to-edge insets; burn-in uses h264_mediacodec
+  then libopenh264 (the FFmpeg build is LGPL, has NO libx264); no REQUEST_IGNORE_BATTERY_OPTIMIZATIONS or exact
+  alarms (Play policy); Report line + AboutActivity (licences); FGS onTimeout; CI builds APK + AAB.
 - The repository moved to idkformyprojects-design/subforge-test (the old "subforge" repo stopped accepting any writes).
 - Signing: the owner's release key is NOT in the repo. Until the 4 GitHub secrets are added, CI APKs are
   debug-signed and must be re-signed with the owner's key before they install over the current app.

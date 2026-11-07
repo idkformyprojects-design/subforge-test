@@ -9,14 +9,14 @@ val hasReleaseKey = keystorePath != null && file(keystorePath).exists()
 
 android {
     namespace = "ai.subforge.universal"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "ai.subforge.universal"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 7
-        versionName = "1.5.0"
+        targetSdk = 36
+        versionCode = 8
+        versionName = "1.6.0"
         ndk {
             abiFilters.addAll(listOf("arm64-v8a"))
         }

@@ -4,5 +4,8 @@
         <item name="android:colorPrimary">@color/primary</item>
         <item name="android:colorPrimaryDark">@color/primary_dark</item>
         <item name="android:colorAccent">@color/primary</item>
+        <!-- Each screen draws its own header bar (see Screen.kt), which handles Android 15/16 edge-to-edge. -->
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
     </style>
 </resources>

@@ -142,13 +142,48 @@ object Media {
                 // continue; FFmpeg will fall back to its default font
             }
         }
-        val direct = run(exportArgs(context, video, srt, FFmpegKitConfig.getSafParameterForWrite(context, out), kind, languageCode), onTimeSec)
+        // Burn-in has to re-encode the picture. This FFmpeg build has no x264, so use the phone's own hardware
+        // H.264 encoder (fast, and licensed by the phone maker) and fall back to the OpenH264 software encoder.
+        val encoders = if (kind == Export.BURN_IN) listOf("h264_mediacodec", "libopenh264") else listOf("")
+        val kbps = if (kind == Export.BURN_IN) videoKbps(context, video) else 0
+        var last: Result? = null
+        for (enc in encoders) {
+            val r = exportOnce(context, video, srt, out, kind, languageCode, enc, kbps, onTimeSec)
+            if (r.ok || r.cancelled) return r
+            last = r
+        }
+        return last ?: Result(false, false, "Nothing was exported")
+    }
+
+    /** A sensible H.264 bitrate for the video's size (about 5 Mbit/s for 1080p, 2.3 for 720p). */
+    private fun videoKbps(context: Context, video: Uri): Int {
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(context, video)
+            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            if (w <= 0 || h <= 0) 4000 else (w.toLong() * h * 2.5 / 1000).toInt().coerceIn(1000, 12000)
+        } catch (e: Exception) {
+            4000
+        } finally {
+            try { r.release() } catch (e: Exception) { }
+        }
+    }
+
+    private fun exportOnce(
+        context: Context, video: Uri, srt: File, out: Uri, kind: Export, languageCode: String,
+        encoder: String, kbps: Int, onTimeSec: (Double) -> Unit,
+    ): Result {
+        val direct = run(
+            exportArgs(context, video, srt, FFmpegKitConfig.getSafParameterForWrite(context, out), kind, languageCode, encoder, kbps),
+            onTimeSec,
+        )
         if (direct.ok || direct.cancelled) return direct
 
         val tmpDir = context.getExternalFilesDir(null) ?: context.filesDir
         val tmp = File(tmpDir, "export_tmp." + kind.ext)
         tmp.delete()
-        val viaFile = run(exportArgs(context, video, srt, tmp.absolutePath, kind, languageCode), onTimeSec)
+        val viaFile = run(exportArgs(context, video, srt, tmp.absolutePath, kind, languageCode, encoder, kbps), onTimeSec)
         if (!viaFile.ok) {
             tmp.delete()
             return viaFile
@@ -167,6 +202,7 @@ object Media {
 
     private fun exportArgs(
         context: Context, video: Uri, srt: File, output: String, kind: Export, lang: String,
+        encoder: String, kbps: Int,
     ): List<String> {
         val input = FFmpegKitConfig.getSafParameterForRead(context, video)
         return when (kind) {
@@ -187,7 +223,7 @@ object Media {
                     "-y", "-i", input,
                     "-vf", "subtitles=filename='${srt.absolutePath}':charenc=UTF-8:force_style='$style'",
                     "-map", "0:v:0", "-map", "0:a:0?",
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
+                    "-c:v", encoder, "-b:v", "${kbps}k", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
                     "-f", "mp4", output,
                 )

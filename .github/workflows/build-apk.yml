@@ -25,7 +25,7 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          packages: "platforms;android-34 build-tools;34.0.0"
+          packages: "platforms;android-36 build-tools;35.0.0"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -44,28 +44,34 @@ jobs:
             echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
           fi
 
-      - name: Build release APK
+      - name: Build release APK and AAB (Play Store bundle)
         env:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
+        run: gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
 
-      - name: Rename APK
-        run: mv app/build/outputs/apk/release/*.apk app/build/outputs/apk/release/SubForge-v1.5.0-arm64.apk
+      - name: Name files after the app version
+        run: |
+          V=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          echo "APP_VERSION=$V" >> "$GITHUB_ENV"
+          mkdir -p ../dist
+          mv app/build/outputs/apk/release/*.apk "../dist/SubForge-v$V-arm64.apk"
+          mv app/build/outputs/bundle/release/*.aab "../dist/SubForge-v$V.aab"
+          ls -la ../dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SubForge-APK
-          path: android-app/app/build/outputs/apk/release/SubForge-v1.5.0-arm64.apk
+          name: SubForge-${{ env.APP_VERSION }}
+          path: dist/
 
-      - name: Publish APK as a GitHub Release (easy phone download)
+      - name: Publish as a GitHub Release (easy phone download)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" app/build/outputs/apk/release/SubForge-v1.5.0-arm64.apk \
+          gh release create "$TAG" ../dist/* \
             --repo "${{ github.repository }}" \
-            --title "SubForge v1.5.0 (build ${{ github.run_number }})" \
-            --notes "Install on Android: open this APK on your phone and allow installing from this source." \
+            --title "SubForge v${{ env.APP_VERSION }} (build ${{ github.run_number }})" \
+            --notes "APK: install on Android (allow installing from this source). AAB: for uploading to Google Play." \
             --target "${{ github.sha }}" --latest

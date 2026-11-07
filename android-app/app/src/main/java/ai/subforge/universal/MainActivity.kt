@@ -207,6 +207,7 @@ class MainActivity : Activity() {
         col.addView(openLastBtn)
         col.addView(button("History & storage") { startActivity(Intent(this, HistoryActivity::class.java)) })
         col.addView(button("Settings (Gemini API key, models)") { showSettings() })
+        col.addView(button("About, privacy & licences") { startActivity(Intent(this, AboutActivity::class.java)) })
         batteryNote = TextView(this).apply {
             setPadding(0, dp(16), 0, 0)
             textSize = 14f
@@ -225,7 +226,7 @@ class MainActivity : Activity() {
                 "using your own free API key. Work continues in the background; a 2-hour movie takes roughly 5–20 minutes."
         })
 
-        setContentView(ScrollView(this).apply { addView(col) })
+        Screen.show(this, "SubForge", ScrollView(this).apply { addView(col) })
     }
 
     // ---------------------------------------------------------------- actions
@@ -295,35 +296,29 @@ class MainActivity : Activity() {
     }
 
     /** Notifications (Android 13+) and "run in background without limits" so long jobs are not stopped. */
-    /** Asks Android to stop limiting the app; if that screen is missing, opens the app's own settings page. */
+    /**
+     * Opens this app's settings page, where the user can set Battery to "Unrestricted" / allow background
+     * activity. (Asking Android directly needs a permission Google Play only allows for a few kinds of apps.)
+     */
     private fun openBatterySettings() {
+        toast("Tap \u201cBattery\u201d (or \u201cApp battery usage\u201d) and choose \u201cUnrestricted\u201d / allow background activity")
         try {
-            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         } catch (e: Exception) {
             try {
-                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             } catch (e2: Exception) {
-                toast("Open Settings → Apps → SubForge → Battery and allow background activity")
+                toast("Open Settings \u2192 Apps \u2192 SubForge \u2192 Battery and allow background activity")
             }
         }
     }
 
+    /** Notifications (Android 13+). Background activity is suggested by the orange note, not asked automatically. */
     private fun askPermissionsOnce() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFY)
-        }
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (!prefs.askedBattery && !pm.isIgnoringBatteryOptimizations(packageName)) {
-            prefs.askedBattery = true
-            try {
-                startActivity(
-                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
-                )
-            } catch (e: Exception) {
-                // some phones do not have this screen
-            }
         }
     }
 

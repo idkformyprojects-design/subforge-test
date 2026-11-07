@@ -62,7 +62,7 @@ class HistoryActivity : Activity() {
             setOnItemClickListener { _, _, pos, _ -> entries.getOrNull(pos)?.let { choose(it) } }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         })
-        setContentView(root)
+        Screen.show(this, "History & storage", root)
     }
 
     override fun onResume() {

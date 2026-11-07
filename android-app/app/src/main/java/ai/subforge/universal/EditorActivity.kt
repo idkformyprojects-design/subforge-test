@@ -75,7 +75,7 @@ class EditorActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         }
         root.addView(list)
-        setContentView(root)
+        Screen.show(this, p.videoName.ifBlank { "Subtitles" }, root)
     }
 
     override fun onResume() {
@@ -123,6 +123,13 @@ class EditorActivity : Activity() {
         box.addView(label("Start")); box.addView(startF)
         box.addView(label("End")); box.addView(endF)
         box.addView(label("Text")); box.addView(textF)
+        box.addView(TextView(this).apply {
+            text = "\u2691 Report this line (offensive, harmful or wrong)"
+            textSize = 13f
+            setTextColor(Color.rgb(185, 28, 28))
+            setPadding(0, dp(12), 0, 0)
+            setOnClickListener { reportCue(c) }
+        })
 
         AlertDialog.Builder(this)
             .setTitle("Edit line")
@@ -160,6 +167,32 @@ class EditorActivity : Activity() {
                 }
                 added?.let { editCue(it) }
             }
+            .show()
+    }
+
+    /** Lets the user flag an AI-made line (Google Play requires this for AI-generated content). */
+    private fun reportCue(c: Cue) {
+        val reasons = arrayOf("Offensive or harmful", "Wrong or made-up words", "Bad translation", "Something else")
+        AlertDialog.Builder(this)
+            .setTitle("Report this line")
+            .setItems(reasons) { _, which ->
+                val p = project()
+                AppInfo.report(
+                    this, reasons[which],
+                    "Line ${Srt.ts(c.start)} \u2192 ${Srt.ts(c.end)}:\n\"${c.text}\"\n" +
+                        "Language: ${p?.language?.name ?: "?"}",
+                )
+                if (which == 0) {
+                    AlertDialog.Builder(this)
+                        .setMessage("Do you also want to remove this line from your subtitles?")
+                        .setPositiveButton("Remove it") { _, _ ->
+                            ProjectStore.edit(this) { pr -> markPartEdited(pr, c); pr.cues.remove(c) }
+                        }
+                        .setNegativeButton("Keep it", null)
+                        .show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

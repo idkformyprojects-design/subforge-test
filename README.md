@@ -1,4 +1,4 @@
-# SubForge (v1.5.0)
+# SubForge (v1.6.0)
 
 Android app that makes subtitles for any video, in any language, using your own **free** Google Gemini key.
 
@@ -15,6 +15,14 @@ Android app that makes subtitles for any video, in any language, using your own 
    - Burn subtitles into the picture (slow, but shows on every player, WhatsApp, etc.)
 
 The video never leaves the phone. Only the sound goes to Gemini.
+
+### New in v1.6.0 (Play Store preparation)
+- Targets **Android 16 (API 36)**; own header bar with correct edge-to-edge spacing on Android 8–16.
+- Burn-in fixed: uses the phone's hardware H.264 encoder, falling back to OpenH264 (this FFmpeg build has no x264).
+- Removed Play-restricted permissions (battery-optimisation request, exact alarms).
+- **Report this line** for AI-made subtitles (Play's AI-content rule) and an **About, privacy & licences** screen.
+- Handles Android 15+'s background time limit cleanly. GitHub build now also produces the **AAB** for Google Play.
+- Privacy policy: [PRIVACY.md](PRIVACY.md). FFmpeg here is LGPL v3 (no GPL parts).
 
 ### New in v1.5.0
 - **"About the video" box:** title, character/place names and spoken language are sent with every request, so names are

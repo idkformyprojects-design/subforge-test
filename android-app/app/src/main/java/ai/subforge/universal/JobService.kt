@@ -46,7 +46,15 @@ class JobService : Service() {
             return START_NOT_STICKY
         }
         // Must show the notification within a few seconds of being started.
-        goForeground("Starting…", -1.0)
+        if (!goForeground("Starting…", -1.0)) {
+            // Android refused (e.g. Android 15+'s daily limit for background data work was used up).
+            val msg = "Android didn't allow SubForge to work in the background right now. " +
+                "Keep SubForge open, or try again later."
+            ProjectStore.edit(applicationContext) { it.message = msg }
+            ProjectStore.status(msg, ProjectStore.fraction)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (ProjectStore.running) return START_NOT_STICKY
 
         val newJob = intent?.action == ACTION_START
@@ -137,7 +145,21 @@ class JobService : Service() {
 
     // ------------------------------------------------------------------ notifications
 
-    private fun goForeground(text: String, fraction: Double) {
+    /**
+     * Android 15+ limits background data work to about 6 hours a day. If a job ever reaches that, stop
+     * cleanly (progress is saved, Continue works later) instead of letting Android close the app.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        worker?.cancel()
+        val msg = "Android's daily limit for background work was reached. Your progress is saved; tap Continue later."
+        ProjectStore.edit(applicationContext) { it.message = msg }
+        ProjectStore.status(msg, ProjectStore.fraction)
+        stopForegroundCompat()
+        stopSelf()
+    }
+
+    /** Shows/updates the progress notification. Returns false if Android refuses background work. */
+    private fun goForeground(text: String, fraction: Double): Boolean {
         val cancel = PendingIntent.getService(
             this, 1, Intent(this, JobService::class.java).setAction(ACTION_CANCEL),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -161,10 +183,15 @@ class JobService : Service() {
         if (fraction >= 0) b.setProgress(1000, (fraction.coerceIn(0.0, 1.0) * 1000).toInt(), false)
         else b.setProgress(0, 0, true)
         val n = b.build()
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIFY_PROGRESS, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIFY_PROGRESS, n)
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIFY_PROGRESS, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFY_PROGRESS, n)
+            }
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -202,16 +229,8 @@ class JobService : Service() {
     private fun setWakeAlarm(inMs: Long) {
         val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val at = SystemClock.elapsedRealtime() + inMs.coerceAtLeast(1000L)
-        val pi = wakeIntent(this)
-        try {
-            if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
-                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
-            } else {
-                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
-            }
-        } catch (e: SecurityException) {
-            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
-        }
+        // A normal (not exact) alarm: needs no special permission, which Google Play restricts.
+        am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, wakeIntent(this))
     }
 
     private fun cancelWakeAlarm() {
